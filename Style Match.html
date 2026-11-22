@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Style Match – Edit Suggestions from a Reference Photo</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d1c1a;--mute:#6b6862;--line:#e3dfd6;--acc:#c2410c;--accs:#fde8dc;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#141413;--card:#1e1d1b;--ink:#efece6;--mute:#9a968d;--line:#33312d;--acc:#fb923c;--accs:#3a2416}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#141413;--card:#1e1d1b;--ink:#efece6;--mute:#9a968d;--line:#33312d;--acc:#fb923c;--accs:#3a2416}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,"Times New Roman",serif}
+main{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:clamp(26px,5vw,40px);margin:0 0 6px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 24px;font-family:system-ui,sans-serif;font-size:15px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.drop{background:var(--card);border:2px dashed var(--line);border-radius:14px;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;cursor:pointer;overflow:hidden;position:relative;font-family:system-ui,sans-serif}
+.drop.over{border-color:var(--acc)}
+.drop b{font-size:15px}.drop span{color:var(--mute);font-size:13px}
+.drop img{width:100%;height:100%;max-height:300px;object-fit:contain;display:block}
+.tag{position:absolute;top:8px;left:8px;background:var(--ink);color:var(--bg);font:600 11px system-ui;padding:3px 8px;border-radius:99px;letter-spacing:.04em}
+button{font:600 15px system-ui,sans-serif;background:var(--acc);color:#fff;border:0;border-radius:10px;padding:12px 20px;cursor:pointer;margin:16px 0}
+button:disabled{opacity:.4;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px;font-family:system-ui,sans-serif}
+.card h2{font:700 13px system-ui;text-transform:uppercase;letter-spacing:.08em;color:var(--acc);margin:0 0 10px}
+.card p{margin:6px 0;font-size:15px}
+.card ul{margin:6px 0;padding-left:20px;font-size:15px}
+canvas{max-width:100%;display:block;border-radius:10px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--mute);margin-top:10px}
+input[type=range]{flex:1;min-width:140px;accent-color:var(--acc)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--mute);font-weight:600;font-size:12px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.pill{display:inline-block;background:var(--accs);color:var(--acc);border-radius:6px;padding:1px 7px;font-weight:600;font-size:13px}
+.note{color:var(--mute);font-size:13px}
+.rawnote{position:absolute;bottom:8px;left:8px;right:8px;background:var(--card);color:var(--mute);border:1px solid var(--line);font:12px/1.35 system-ui,sans-serif;padding:5px 8px;border-radius:8px;text-align:left}
+#res{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Style Match</h1>
+<p class="sub">Upload your raw (unedited) photo and a stylized reference. Get Lightroom-style suggestions for tone curve, white balance, color mixing and toning. Everything runs in your browser; nothing is uploaded.</p>
+
+<div class="grid">
+  <label class="drop" id="d1"><span class="tag">1 · YOUR RAW</span><b>Drop or tap to add your raw photo</b><span>JPG, PNG, WebP, or RAW (ARW, RAF, CR2, CR3, NEF, DNG…)</span><input type="file" accept="image/*,.arw,.raf,.cr2,.cr3,.nef,.nrw,.dng,.orf,.rw2" hidden></label>
+  <label class="drop" id="d2"><span class="tag">2 · STYLE REFERENCE</span><b>Drop or tap to add the stylized photo</b><span>The look you want</span><input type="file" accept="image/*,.arw,.raf,.cr2,.cr3,.nef,.nrw,.dng,.orf,.rw2" hidden></label>
+</div>
+<button id="go" disabled>Analyze &amp; suggest edits</button>
+
+<div id="res">
+  <div class="card"><h2>Preview: auto-matched look</h2>
+    <canvas id="pv"></canvas>
+    <div class="row"><span>Strength</span><input type="range" id="str" min="0" max="100" value="100"><span id="sv">100%</span></div>
+    <p class="note">This preview applies per-channel curves matched to the reference. Image content differs, so treat it as a guide, then fine-tune with the suggestions below.</p>
+  </div>
+  <div class="card"><h2>Tone curve</h2><canvas id="cv" width="360" height="360" style="width:min(360px,100%)"></canvas><div id="curveTxt"></div></div>
+  <div id="sug"></div>
+</div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const imgs={1:null,2:null};
+const MAXP=900,MAXA=256;
+
+function setup(id,k){
+  const el=$(id),inp=el.querySelector('input');
+  const take=async f=>{if(!f)return;let note='';
+    if(RAWRE.test(f.name)){
+      try{const b=await rawPreview(f);if(!b)throw 0;f=b;note='RAW file: using its embedded JPEG preview, which includes the camera’s own processing (picture style, film simulation, white balance).'}
+      catch(e){alert('Couldn’t find a usable embedded preview in this RAW file. Try exporting a JPEG from your RAW editor instead.');return}
+    }else if(!f.type.startsWith('image/'))return;
+    const im=new Image();im.onload=()=>{
+      const big=draw(im,MAXP),sm=draw(im,MAXA);
+      imgs[k]={big,sm};
+      el.querySelectorAll('img,.rawnote').forEach(x=>x.remove());
+      const t=document.createElement('img');t.src=big.toDataURL('image/jpeg',.85);el.appendChild(t);
+      if(note){const nn=document.createElement('span');nn.className='rawnote';nn.textContent=note;el.appendChild(nn)}
+      el.querySelector('b').style.display=el.querySelector('span:not(.tag)').style.display='none';
+      $('#go').disabled=!(imgs[1]&&imgs[2]);
+    };im.src=URL.createObjectURL(f)};
+  inp.onchange=()=>take(inp.files[0]);
+  el.ondragover=e=>{e.preventDefault();el.classList.add('over')};
+  el.ondragleave=()=>el.classList.remove('over');
+  el.ondrop=e=>{e.preventDefault();el.classList.remove('over');take(e.dataTransfer.files[0])};
+}
+setup('#d1',1);setup('#d2',2);
+
+const RAWRE=/\.(arw|raf|cr2|cr3|nef|nrw|dng|orf|rw2)$/i;
+// Find the largest embedded JPEG preview inside a RAW file
+async function rawPreview(f){
+  const u=new Uint8Array(await f.arrayBuffer()),n=u.length;let best=null;
+  for(let i=0;i<n-3;i++){
+    if(u[i]!==0xFF||u[i+1]!==0xD8||u[i+2]!==0xFF)continue;
+    let p=i+2,ok=false;
+    while(p<n-4){
+      if(u[p]!==0xFF){break}
+      const m=u[p+1];
+      if(m===0xFF){p++;continue}
+      if(m===0xDA){ok=true;break}
+      if(m===0xD9)break;
+      const len=(u[p+2]<<8)|u[p+3];if(len<2)break;p+=2+len;
+    }
+    if(!ok)continue;
+    let e=-1;
+    for(let j=p+4;j<n-1;j++){if(u[j]===0xFF&&u[j+1]===0xD9){e=j+2;break}}
+    if(e<0)continue;
+    if(!best||e-i>best[1]-best[0])best=[i,e];
+  }
+  if(!best||best[1]-best[0]<20000)return null;
+  return new Blob([u.subarray(best[0],best[1])],{type:'image/jpeg'});
+}
+
+function draw(im,max){
+  const s=Math.min(1,max/Math.max(im.width,im.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*s));c.height=Math.max(1,Math.round(im.height*s));
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c;
+}
+const pix=c=>c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+
+function rgb2hsl(r,g,b){
+  r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2,d=mx-mn;
+  if(!d)return[0,0,l];
+  const s=d/(1-Math.abs(2*l-1));let h;
+  if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;
+  h*=60;if(h<0)h+=360;return[h,s,l];
+}
+const BANDS=[['Red',0,'#e53935'],['Orange',30,'#fb8c00'],['Yellow',60,'#fdd835'],['Green',120,'#43a047'],['Aqua',180,'#00acc1'],['Blue',240,'#1e66e5'],['Purple',275,'#8e24aa'],['Magenta',320,'#d81b8c']];
+function bandOf(h){let bi=0,bd=999;BANDS.forEach((b,i)=>{let d=Math.abs(h-b[1]);d=Math.min(d,360-d);if(d<bd){bd=d;bi=i}});return bi}
+
+function stats(d){
+  const n=d.length/4,H=[0,1,2,3].map(()=>new Float64Array(256)),L=new Float32Array(n);
+  let sr=0,sg=0,sb=0,ssat=0,cs=0;
+  for(let i=0,p=0;i<d.length;i+=4,p++){
+    const r=d[i],g=d[i+1],b=d[i+2],l=Math.round(.2126*r+.7152*g+.0722*b);
+    L[p]=l;H[0][r]++;H[1][g]++;H[2][b]++;H[3][l]++;sr+=r;sg+=g;sb+=b;
+  }
+  const cdf=H.map(h=>{const c=new Float64Array(256);let a=0;for(let i=0;i<256;i++){a+=h[i];c[i]=a/n}return c});
+  const pct=q=>{for(let i=0;i<256;i++)if(cdf[3][i]>=q)return i;return 255};
+  const p={p1:pct(.01),p20:pct(.2),p50:pct(.5),p80:pct(.8),p99:pct(.99)};
+  let m=0;for(let i=0;i<n;i++)m+=L[i];m/=n;let v=0;for(let i=0;i<n;i++)v+=(L[i]-m)**2;
+  const zone=[[0,0,0,0],[0,0,0,0]]; // shadows, highlights: r,g,b,count
+  const bd=BANDS.map(()=>({c:0,x:0,y:0,s:0,l:0}));
+  for(let i=0,pI=0;i<d.length;i+=4,pI++){
+    const r=d[i],g=d[i+1],b=d[i+2],l=L[pI];
+    if(l<=p.p20){const z=zone[0];z[0]+=r;z[1]+=g;z[2]+=b;z[3]++}
+    else if(l>=p.p80){const z=zone[1];z[0]+=r;z[1]+=g;z[2]+=b;z[3]++}
+    const [h,s,ll]=rgb2hsl(r,g,b);
+    ssat+=s;cs++;
+    if(s>.12&&ll>.08&&ll<.95){const o=bd[bandOf(h)];o.c++;const a=h*Math.PI/180;o.x+=Math.cos(a)*s;o.y+=Math.sin(a)*s;o.s+=s;o.l+=ll}
+  }
+  const zm=zone.map(z=>z[3]?[z[0]/z[3],z[1]/z[3],z[2]/z[3]]:[0,0,0]);
+  return{n,cdf,p,std:Math.sqrt(v/n),mean:[sr/n,sg/n,sb/n],sat:ssat/cs,zm,
+    bands:bd.map(o=>o.c?{c:o.c/n,hue:(Math.atan2(o.y,o.x)*180/Math.PI+360)%360,s:o.s/o.c,l:o.l/o.c}:{c:0})};
+}
+
+function lut(src,ref){
+  const o=new Float32Array(256);let j=0;
+  for(let i=0;i<256;i++){while(j<255&&ref[j]<src[i])j++;o[i]=j}
+  const sm=new Float32Array(256);
+  for(let i=0;i<256;i++){let a=0,c=0;for(let k=-6;k<=6;k++){const t=i+k;if(t>=0&&t<256){a+=o[t];c++}}sm[i]=a/c}
+  sm[0]=o[0];sm[255]=o[255];
+  for(let i=1;i<256;i++)if(sm[i]<sm[i-1])sm[i]=sm[i-1];
+  return sm;
+}
+
+const q=v=>{const a=Math.abs(v);return a<3?'negligible':a<8?'slight':a<18?'moderate':'strong'};
+const sg=(v,r=0)=>(v>=0?'+':'−')+Math.abs(v).toFixed(r);
+const clamp=(v,a=100)=>Math.max(-a,Math.min(a,v));
+function hueName(h){return BANDS[bandOf(h)][0].toLowerCase()}
+
+let LUTS=null,RAWBIG=null;
+$('#go').onclick=()=>{
+  const A=stats(pix(imgs[1].sm)),B=stats(pix(imgs[2].sm));
+  LUTS=[0,1,2,3].map(i=>lut(A.cdf[i],B.cdf[i]));
+  RAWBIG=imgs[1].big;
+  $('#res').style.display='block';
+  renderPreview();renderCurve(A,B);renderSuggestions(A,B);
+  $('#res').scrollIntoView({behavior:'smooth'});
+};
+
+function renderPreview(){
+  const t=$('#str').value/100;$('#sv').textContent=Math.round(t*100)+'%';
+  const c=$('#pv'),s=RAWBIG;c.width=s.width;c.height=s.height;
+  const ctx=c.getContext('2d'),id=s.getContext('2d').getImageData(0,0,s.width,s.height),d=id.data;
+  for(let i=0;i<d.length;i+=4)for(let k=0;k<3;k++){const v=d[i+k];d[i+k]=v+(LUTS[k][v]-v)*t}
+  ctx.putImageData(id,0,0);
+}
+$('#str').oninput=()=>LUTS&&renderPreview();
+
+function renderCurve(A,B){
+  const c=$('#cv'),x=c.getContext('2d'),W=c.width,cs=getComputedStyle(document.documentElement);
+  x.clearRect(0,0,W,W);x.strokeStyle=cs.getPropertyValue('--line');x.lineWidth=1;
+  for(let i=0;i<=4;i++){x.beginPath();x.moveTo(i*W/4,0);x.lineTo(i*W/4,W);x.moveTo(0,i*W/4);x.lineTo(W,i*W/4);x.stroke()}
+  x.strokeStyle=cs.getPropertyValue('--mute');x.setLineDash([4,4]);x.beginPath();x.moveTo(0,W);x.lineTo(W,0);x.stroke();x.setLineDash([]);
+  [[0,'#e53935'],[1,'#43a047'],[2,'#1e66e5'],[3,cs.getPropertyValue('--ink')]].forEach(([k,col])=>{
+    x.strokeStyle=col;x.lineWidth=k===3?3:1.5;x.globalAlpha=k===3?1:.8;x.beginPath();
+    for(let i=0;i<256;i++){const px=i/255*W,py=W-LUTS[k][i]/255*W;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke();
+  });x.globalAlpha=1;
+  const pts=[0,32,64,96,128,160,192,224,255].map(i=>`${i}→${Math.round(LUTS[3][i])}`);
+  $('#curveTxt').innerHTML=`<p class="note">White = luminance curve; red, green and blue lines are the per-channel curves. Dashed line = no change.</p><p><b>Luminance anchor points</b> (input→output, 0–255):<br>${pts.join(' &nbsp; ')}</p>`;
+}
+
+function renderSuggestions(A,B){
+  const out=[];
+  const card=(t,h)=>out.push(`<div class="card"><h2>${t}</h2>${h}</div>`);
+  // Tone
+  const ev=2.2*Math.log2((B.p.p50+1)/(A.p.p50+1));
+  const bl=B.p.p1-A.p.p1,wh=B.p.p99-A.p.p99;
+  const sh=B.zm[0].reduce((a,b)=>a+b)/3-A.zm[0].reduce((a,b)=>a+b)/3;
+  const hi=B.zm[1].reduce((a,b)=>a+b)/3-A.zm[1].reduce((a,b)=>a+b)/3;
+  const cr=B.std/A.std;
+  let tl=[];
+  tl.push(`<li><b>Exposure:</b> ${q(ev*20)} change, about <span class="pill">${sg(ev,2)} EV</span></li>`);
+  tl.push(`<li><b>Contrast:</b> ${cr>1.03?'increase':cr<.97?'decrease':'keep about the same'}${Math.abs(cr-1)>.03?` (~<span class="pill">${sg(clamp((cr-1)*120),0)}</span>)`:''}. The reference’s tonal spread is ${Math.round(cr*100)}% of yours.</li>`);
+  tl.push(`<li><b>Highlights:</b> ${hi>3?'raise':hi<-3?'pull down':'leave'} ${Math.abs(hi)>=3?`(<span class="pill">${sg(clamp(hi*1.2),0)}</span>)`:''}</li>`);
+  tl.push(`<li><b>Shadows:</b> ${sh>3?'lift':sh<-3?'deepen':'leave'} ${Math.abs(sh)>=3?`(<span class="pill">${sg(clamp(sh*1.2),0)}</span>)`:''}</li>`);
+  tl.push(`<li><b>Whites:</b> ${q(wh)} ${wh>0?'increase':'decrease'} (<span class="pill">${sg(clamp(wh*1.5),0)}</span>)</li>`);
+  tl.push(`<li><b>Blacks:</b> ${bl>6?'<b>lift the black point</b> for a faded or matte look':bl<-6?'crush the blacks for deeper, punchier shadows':'minimal change'} (<span class="pill">${sg(clamp(bl*1.2),0)}</span>)</li>`);
+  card('Light &amp; tone','<ul>'+tl.join('')+'</ul><p class="note">Slider numbers are approximate starting points on a ±100 scale.</p>');
+  // WB
+  const tmp=(B.mean[0]-B.mean[2])-(A.mean[0]-A.mean[2]);
+  const tint=(B.mean[1]-(B.mean[0]+B.mean[2])/2)-(A.mean[1]-(A.mean[0]+A.mean[2])/2);
+  const sd=(B.sat-A.sat)*100;
+  card('White balance &amp; saturation',`<ul>
+   <li><b>Temperature:</b> ${q(tmp/2)} shift toward <b>${tmp>0?'warmer (yellow/orange)':'cooler (blue)'}</b> <span class="pill">${sg(clamp(tmp*.8),0)}</span></li>
+   <li><b>Tint:</b> ${q(tint/2)} shift toward <b>${tint>0?'green':'magenta'}</b> <span class="pill">${sg(clamp(tint*.8),0)}</span></li>
+   <li><b>Saturation:</b> overall ${sd>2?'boost':sd<-2?'reduce':'about the same'} <span class="pill">${sg(clamp(sd*2.5),0)}</span> (average saturation ${Math.round(A.sat*100)}% → ${Math.round(B.sat*100)}%)</li></ul>`);
+  // Color mixer
+  let rows='';
+  BANDS.forEach((b,i)=>{
+    const a=A.bands[i],r=B.bands[i];if(!a.c||!r.c||a.c<.008||r.c<.008)return;
+    let dh=((r.hue-a.hue+540)%360)-180;
+    const ds=(r.s/a.s-1)*100,dl=(r.l-a.l)*100;
+    if(Math.abs(dh)<2&&Math.abs(ds)<5&&Math.abs(dl)<2)return;
+    rows+=`<tr><td><span class="sw" style="background:${b[2]}"></span>${b[0]}</td><td>${sg(clamp(dh*3.3),0)}</td><td>${sg(clamp(ds),0)}</td><td>${sg(clamp(dl*2.5),0)}</td></tr>`;
+  });
+  card('Color mixer (HSL)',rows?`<table><tr><th>Color</th><th>Hue</th><th>Sat</th><th>Lum</th></tr>${rows}</table><p class="note">Only colors present in both photos are listed. Positive hue moves toward the next color around the wheel (red→orange→yellow→green→aqua→blue→purple→magenta).</p>`:'<p>The colors present in both photos are already close. Focus on the tone curve and toning.</p>');
+  // Split toning
+  const tone=(z,za,zb)=>{
+    const la=za[0]*.2126+za[1]*.7152+za[2]*.0722,lb=zb[0]*.2126+zb[1]*.7152+zb[2]*.0722;
+    const d=[zb[0]-lb-(za[0]-la),zb[1]-lb-(za[1]-la),zb[2]-lb-(za[2]-la)];
+    const mag=Math.hypot(...d);if(mag<3)return`<li><b>${z}:</b> no meaningful color tint change</li>`;
+    const [h,s]=rgb2hsl(128+d[0]*6,128+d[1]*6,128+d[2]*6);
+    return`<li><b>${z}:</b> add a ${q(mag*2)} <b>${hueName(h)}</b> tint (hue ≈ <span class="pill">${Math.round(h)}°</span>, saturation ≈ <span class="pill">${Math.min(60,Math.round(mag*3))}</span>)</li>`;
+  };
+  card('Color grading / split toning','<ul>'+tone('Shadows',A.zm[0],B.zm[0])+tone('Highlights',A.zm[1],B.zm[1])+'</ul>');
+  card('Workflow tip','<p>1) Set exposure, contrast and white balance. 2) Shape the tone curve using the anchor points above (add 4–5 points). 3) Adjust the color mixer. 4) Apply the shadow and highlight tints. 5) Compare against the reference at a small size so you judge the overall mood.</p>');
+  $('#sug').innerHTML=out.join('');
+}
+</script>
+</body>
+</html>
